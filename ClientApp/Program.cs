@@ -3,6 +3,7 @@ using System.Text;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
+using System.Linq;
 
 namespace ClientApp
 {
@@ -16,19 +17,20 @@ namespace ClientApp
 
             ActivateListener();
 
+            Console.Write("Enter your name: ");
+            string name = Console.ReadLine();
+            name = new string(name.Where(char.IsLetter).ToArray());
+
+
             while (true)
             {
-                string str = Console.ReadLine();
+                string str = string.Format("{0}:\t{1}", name, Console.ReadLine());
 
                 server = new TcpClient(serverAddress, serverPort);
                 NetworkStream serverStream = server.GetStream();
                 byte[] stringToByte = Encoding.ASCII.GetBytes(str);
                 serverStream.Write(stringToByte, 0, stringToByte.Length);
 
-                //receiving
-                /*byte[] receive = new byte[server.ReceiveBufferSize];
-                serverStream.Read(receive, 0, server.ReceiveBufferSize);
-                Console.WriteLine(Encoding.ASCII.GetString(receive));*/
                 server.Close();
             }
 
@@ -40,7 +42,8 @@ namespace ClientApp
             listener.Start();
             while (true)
             {
-                await Task.Run(()=> {
+                await Task.Run(() =>
+                {
                     Socket serverSocket = listener.AcceptSocket();
                     byte[] messageStream = new byte[serverSocket.ReceiveBufferSize];
                     serverSocket.Receive(messageStream);

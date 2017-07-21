@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Collections.Generic;
+using System.IO;
 
 namespace ConsoleApp2
 {
@@ -27,17 +28,22 @@ namespace ConsoleApp2
             while (true)
             {
                 Socket clientSocket = server.AcceptSocket();
-                Console.WriteLine("Connection Incoming....");
                 byte[] incomingStream = new byte[2048];
                 clientSocket.Receive(incomingStream);
 
                 string message = Encoding.ASCII.GetString(incomingStream).Trim('\0');
 
-                Console.WriteLine(message);
-
                 string clientIP = (clientSocket.RemoteEndPoint as IPEndPoint).Address.ToString();
                 IP_Addresses.Add(clientIP);
+                Console.WriteLine("IP: {0} | {1}", clientIP, message);
 
+                //logging
+                using (StreamWriter sw = new StreamWriter("chatLogs.txt", true))
+                {
+                    sw.WriteLine("IP: {0} | {1}", clientIP, message);
+                }
+
+                //sending to all other clients
                 foreach (string ip in IP_Addresses)
                 {
                     if (!ip.Equals(clientIP))
@@ -50,7 +56,7 @@ namespace ConsoleApp2
                 }
 
                 clientSocket.Close();
-                Console.WriteLine("Socket Closed");
+                clientSocket.Dispose();
             }
         }
     }
