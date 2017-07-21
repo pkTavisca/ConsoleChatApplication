@@ -21,14 +21,13 @@ namespace ClientApp
             string name = Console.ReadLine();
             name = new string(name.Where(char.IsLetter).ToArray());
 
-
             while (true)
             {
-                string str = string.Format("{0}:\t{1}", name, Console.ReadLine());
+                string messageToSend = string.Format("{0}:\t{1}", name, Console.ReadLine());
 
                 server = new TcpClient(serverAddress, serverPort);
                 NetworkStream serverStream = server.GetStream();
-                byte[] stringToByte = Encoding.ASCII.GetBytes(str);
+                byte[] stringToByte = Encoding.ASCII.GetBytes(messageToSend);
                 serverStream.Write(stringToByte, 0, stringToByte.Length);
 
                 server.Close();
