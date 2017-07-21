@@ -12,12 +12,6 @@ namespace ConsoleApp2
         public static HashSet<string> IP_Addresses = new HashSet<string>();
         static void Main(string[] args)
         {
-            //Lambda.PatternThroughLambda();
-
-            /*AsyncAndAwait aaa = new AsyncAndAwait();
-            int a = aaa.SomeMethod();
-            Console.WriteLine(a);*/
-
             string myIP = "192.168.6.16";
 
             IPAddress localAddress = IPAddress.Parse(myIP);
@@ -48,10 +42,14 @@ namespace ConsoleApp2
                 {
                     if (!ip.Equals(clientIP))
                     {
-                        TcpClient tcpClient = new TcpClient(ip, 500);
-                        NetworkStream tcpStream = tcpClient.GetStream();
-                        tcpStream.Write(Encoding.ASCII.GetBytes(message), 0, message.Length);
-                        tcpClient.Close();
+                        try
+                        {
+                            TcpClient tcpClient = new TcpClient(ip, 500);
+                            NetworkStream tcpStream = tcpClient.GetStream();
+                            tcpStream.Write(Encoding.ASCII.GetBytes(message), 0, message.Length);
+                            tcpClient.Close();
+                        }
+                        catch { }
                     }
                 }
 
