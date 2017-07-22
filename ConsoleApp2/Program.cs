@@ -1,232 +1,206 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace ConsoleApp2
 {
-    public class Client
-    {
-        public Client(string ipAddress, int port)
-        {
-            this.IPAddress = ipAddress;
-            this.Port = port;
-        }
-
-        public string IPAddress { get; set; }
-
-        public int Port { get; set; }
-
-        public string Alias { get; set; }
-    }
-
     class Program
     {
-        static string myIP = "192.168.6.16";
-        static IPAddress localAddress = IPAddress.Parse(myIP);
-        static TcpListener server = new TcpListener(localAddress, 500);
+        static Dictionary<Client, TcpClient> listOfConnectedClients = new Dictionary<Client, TcpClient>();
+        static int serverPort = 500;
 
-        public static List<Client> lstClient = new List<Client>();
-        public static List<TcpClient> setOfTcpClients = new List<TcpClient>();
-        public static List<KeyValuePair<string, string>> _ipToNameMapping = new List<KeyValuePair<string, string>>();
-
-        static void Main(string[] args)
+        public static void Main(string[] args)
         {
-            server.Start();
+            TcpListener serverListener = new TcpListener(GetOwnIP(), serverPort);
+            serverListener.Start();
 
-            while (true)
+            //loop for adding new clients
+            Task.Run(() =>
             {
-                //TODO: determine multiple clients or single client
-                TcpClient newClient = server.AcceptTcpClient();
-                Console.WriteLine("{0} connected..", (newClient.Client.RemoteEndPoint as IPEndPoint).Address);
-                setOfTcpClients.Add(newClient);
-
-                Task.Run(() =>
+                while (true)
                 {
-                    while (true)
+                    TcpClient newClient = serverListener.AcceptTcpClient();
+                    string newClientIp = GetIpOfClient(newClient).ToString();
+                    bool clientFound = false;
+                    foreach (var connectedClient in listOfConnectedClients)
                     {
-                        ReadMessage();
+                        if (connectedClient.Key.IpAddess.ToString().Equals(newClientIp))
+                        {
+                            connectedClient.Value.Close();
+                            listOfConnectedClients[connectedClient.Key] = newClient;
+                            Console.WriteLine("Replaced Connection : {0}",
+                                connectedClient.Key.ToString());
+                            clientFound = true;
+                            break;
+                        }
                     }
-                });
-            }
+                    if (!clientFound)
+                    {
+                        Client clientToAdd = new Client(newClientIp);
+                        Console.WriteLine("New Connection: {0}", newClientIp);
+                        listOfConnectedClients[clientToAdd] = newClient;
+                    }
+                }
+            });
 
             //chatting loop
-            //while (true)
-            //{
-
-
-            ////var client = HandleClient(clientSocket);
-
-            //LogMessage(client, message);
-
-
-
-            ////logging
-
-
-            ////sending to all other clients
-            //Console.Write("Sending To: ");
-            //foreach (var client in lstClient)
-            //{
-            //    if (!client.IPAddress.Equals(clientIP))
-            //    {
-            //        try
-            //        {
-            //            TcpClient tcpClient = new TcpClient(client.IPAddress, client.Port);
-            //            NetworkStream tcpStream = tcpClient.GetStream();
-            //            tcpStream.Write(Encoding.ASCII.GetBytes(message), 0, message.Length);
-            //            Console.Write("{0}:{1},", client.IPAddress, client.Port);
-            //            tcpClient.Close();
-            //        }
-            //        catch (Exception e)
-            //        {
-            //            Console.WriteLine(e.Message);
-            //            continue;
-            //        }
-            //    }
-            //}
-            //Console.WriteLine();
-
-            //clientSocket.Close();
-            //clientSocket.Dispose();
-            //}
-        }
-        private static bool ContainsKey(string key)
-        {
-            return _ipToNameMapping.Any(kvp => string.Equals(kvp.Key, key, StringComparison.InvariantCultureIgnoreCase));
-        }
-        private static void ReadMessage()
-        {
-            for (int i = 0; i < setOfTcpClients.Count; i++)
+            while (true)
             {
+                //cloning
+                var cloneOfConnectedClients = cloneDictionary(listOfConnectedClients);
+                foreach (var clonedClient in cloneOfConnectedClients)
+                {
+                    if (clonedClient.Value.Connected)
+                    {
+                        NetworkStream stream = clonedClient.Value.GetStream();
+                        try
+                        {
+                            if (stream.DataAvailable)
+                            {
+                                byte[] streamStorage = new byte[4096];
+                                stream.Read(streamStorage, 0, streamStorage.Length);
+                                Task.Run(() =>
+                                {
+                                    ProcessIncomingMessage(Encoding.ASCII.GetString(streamStorage).Trim('\0'), clonedClient.Key);
+                                });
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+        }
 
+        private static void Brodcast(string message, Client from)
+        {
+            var cloneOfConnectedClients = cloneDictionary(listOfConnectedClients);
+            message = (from.ToString())
+                + " : " + message;
+            message = message.Trim('\0');
+            Console.WriteLine(message);
+            foreach (var cloneClient in cloneOfConnectedClients)
+            {
+                if (cloneClient.Value.Connected)
+                {
+                    try
+                    {
+                        NetworkStream stream = cloneClient.Value.GetStream();
+                        stream.Write(Encoding.ASCII.GetBytes(message), 0, message.Length);
+                    }
+                    catch { }
+                }
+            }
+        }
+
+        private static void ProcessIncomingMessage(string message, Client from)
+        {
+            if (message.ToLowerInvariant().StartsWith("to:"))
+            {
+                message = message.Substring("to:".Length);
+                string to = message.Split(' ')[0];
+                message = message.Substring(to.Length);
+                message = string.Format("[Private Message from {0}]: {1}", from.ToString(), message);
+                var clientsClone = cloneDictionary(listOfConnectedClients);
+                foreach (var client in clientsClone)
+                {
+                    if (client.Key.ToString().Equals(to))
+                    {
+                        NetworkStream stream = client.Value.GetStream();
+                        stream.Write(Encoding.ASCII.GetBytes(message), 0, message.Length);
+                        Console.WriteLine("To:{0} {1}", to, message);
+                        break;
+                    }
+                }
+            }
+            else if (message.ToLowerInvariant().StartsWith("get:"))
+            {
+                message = "";
+                var clientsClone = cloneDictionary(listOfConnectedClients);
+                foreach (var client in clientsClone)
+                {
+                    if (!from.ToString().Equals(client.Key.ToString()))
+                        message += client.Key.ToString() + " ";
+                }
+                foreach (var client in clientsClone)
+                {
+                    if (client.Key.ToString().Equals(from.ToString()))
+                    {
+                        if (message == "") message = "Looks like nobody else is here.";
+                        NetworkStream stream = client.Value.GetStream();
+                        stream.Write(Encoding.ASCII.GetBytes(message), 0, message.Length);
+                        break;
+                    }
+                }
+            }
+            else if (message.ToLowerInvariant().StartsWith("name:"))
+            {
+                var clientsClone = cloneDictionary(listOfConnectedClients);
+                foreach (var client in clientsClone)
+                {
+                    if (client.Key.ToString().Equals(from.ToString()))
+                    {
+                        string name = message.Substring("name:".Length);
+                        if (name == null)
+                        {
+                            message = "Name not set.";
+                        }
+                        else
+                        {
+                            message = string.Format("Name set successfully to {0}.", name);
+                            client.Key.Name = name;
+                        }
+                        NetworkStream stream = client.Value.GetStream();
+                        stream.Write(Encoding.ASCII.GetBytes(message), 0, message.Length);
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                Brodcast(message, from);
+            }
+        }
+
+        public static IPAddress GetIpOfClient(TcpClient client)
+        {
+            return (client.Client.RemoteEndPoint as IPEndPoint).Address;
+        }
+
+        //shallow clone
+        private static Dictionary<T, U> cloneDictionary<T, U>(Dictionary<T, U> objToClone)
+        {
+            Dictionary<T, U> cloneOfConnectedClients;
+            while (true)
+            {
                 try
                 {
-                    var item = setOfTcpClients[i];
-                    if (item == null)
-                        continue;
-                    var ip = (item.Client.RemoteEndPoint as IPEndPoint).Address.ToString();
-
-                    if (!item.Connected) continue;
-                    NetworkStream clientStream = item.GetStream();
-                    if (!clientStream.DataAvailable)
+                    cloneOfConnectedClients = new Dictionary<T, U>();
+                    foreach (var entry in objToClone)
                     {
-                        continue;
-                    }
-                    byte[] clientByteStream = new byte[2048];
-                    clientStream.Read(clientByteStream, 0, clientByteStream.Length);
-                    string message = Encoding.ASCII.GetString(clientByteStream).Trim('\0');
-                    //Console.WriteLine(message);
-                    if (ContainsKey(ip) == false)
-                        _ipToNameMapping.Add(new KeyValuePair<string, string>(ip, ip));
-
-                    if (message.ToLowerInvariant().StartsWith("name:"))
-                    {
-                        var name = message.Split(':')[1];
-                        _ipToNameMapping.RemoveAll(k => string.Equals(k.Key, ip));
-                        _ipToNameMapping.Add(new KeyValuePair<string, string>(ip, name));
-                    }
-                    else if (message.ToLowerInvariant().StartsWith("get:"))
-                    {
-                        var clients = string.Empty;
-                        foreach (var key in _ipToNameMapping)
-                        {
-                            clients += key.Value + " ";
-                        }
-
-                        Broadcast(clients, string.Empty, ip);
-                    }
-                    else if(message.ToLowerInvariant().StartsWith("to:"))
-                    {
-                        var to = message.Split(' ')[0].Split(':')[1];
-                        message = message.Replace("to:" + to, "");
-                        var kvp = _ipToNameMapping.FirstOrDefault(k => string.Equals(k.Value, to, StringComparison.InvariantCultureIgnoreCase));
-                        if (string.IsNullOrWhiteSpace(kvp.Key) == false)
-                        {
-                            Broadcast(message, kvp.Value, kvp.Key);
-                        }
-                        
-                    }
-                    else
-                    {
-                        var kvp = _ipToNameMapping.FirstOrDefault(k => string.Equals(k.Key, ip));
-                        Broadcast(message, kvp.Value,  null);
+                        cloneOfConnectedClients[entry.Key] = entry.Value;
                     }
                 }
-                catch (Exception)
+                catch
                 {
-
+                    continue;
                 }
-
+                return cloneOfConnectedClients;
             }
         }
 
-        private static void Broadcast(string message, string name, string ip)
+        public static IPAddress GetOwnIP()
         {
-            if (string.IsNullOrWhiteSpace(name) == false)
-                message = string.Format("[{0}]:{1}\n", name, message);
-            
-            Console.WriteLine(message);
-            var x = new List<TcpClient>(setOfTcpClients);
-
-            if (string.IsNullOrWhiteSpace(ip) == false)
+            IPHostEntry host = Dns.GetHostEntry(Dns.GetHostName());
+            foreach (IPAddress ip in host.AddressList)
             {
-                var client = setOfTcpClients.FirstOrDefault(c => string.Equals((c.Client.RemoteEndPoint as IPEndPoint).Address.ToString(), ip));
-                if(client != null && client.Connected)
-                {
-                    Process(client, message);
-                    return;
-                }
+                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                    return ip;
             }
-            
-            //Console.WriteLine(message);
-            foreach (var client in x)
-            {
-                Process(client, message);
-            }
+            return null;
         }
-
-        private static void Process(TcpClient client, string message)
-        {
-            if (!client.Connected) return;
-            NetworkStream clientStream = client.GetStream();
-            try
-            {
-                clientStream.Write(Encoding.ASCII.GetBytes(message), 0, message.Length);
-            }
-            catch (Exception e)
-            {
-                //Console.WriteLine(e.Message);
-            }
-        }
-
-        private static Client HandleClient(Socket socket)
-        {
-            string clientIP = (socket.RemoteEndPoint as IPEndPoint).Address.ToString();
-            int clientPort;
-            int.TryParse((socket.RemoteEndPoint as IPEndPoint).Port.ToString(), out clientPort);
-
-            if (lstClient.FirstOrDefault(client => string.Equals(client.IPAddress, clientIP)) == null)
-            {
-                lstClient.Add(new Client(clientIP, clientPort));
-            }
-
-            return new Client(clientIP, clientPort);
-        }
-
-        private static void LogMessage(Client client, string message)
-        {
-            Console.WriteLine("IP: {0}:{1} | {2}", client.IPAddress, client.Port, message);
-
-            using (StreamWriter sw = new StreamWriter("chatLogs.txt", true))
-            {
-                sw.WriteLine("IP: {0}:{1} | {2}", client.IPAddress, client.Port, message);
-            }
-        }
-
     }
 }
